@@ -10,6 +10,7 @@ Adafruit_PN532 nfc(-1, -1);
 #define servo_pin D6
 #define green_pin D8
 #define red_pin D7
+#define buzzer_pin D5
 Servo s1;
 
 // servo motor
@@ -36,16 +37,15 @@ void setup()
   s1.write(locked); // initialize servo to locked state
   digitalWrite(red_pin, LOW);
   digitalWrite(green_pin, LOW);
+  noTone(buzzer_pin);
 
   // nfc reader setup
   nfc.begin();
-  if (!nfc.getFirmwareVersion())
+  while (!nfc.getFirmwareVersion())
   {
-    Serial.print("Didn't find PN53x board");
-    while (true)
-    {
-      delay(1);
-    }
+    Serial.print("Could not find PN53x board");
+
+    delay(1000);
   }
 }
 
@@ -89,12 +89,14 @@ void unlock()
   s1.write(unlocked);
   digitalWrite(red_pin, LOW);
   digitalWrite(green_pin, HIGH);
+  tone(buzzer_pin, 500);
 }
 
 // Locks door
 void lock()
 {
   s1.write(locked);
+  noTone(buzzer_pin);
   digitalWrite(red_pin, HIGH);
   digitalWrite(green_pin, LOW);
   delay(200);
