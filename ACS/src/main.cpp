@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <Adafruit_PN532.h>
 #include <Servo.h>
+#include <HttpClient.h>
 
 Adafruit_PN532 nfc(-1, -1);
 
@@ -26,6 +27,22 @@ void checkNFC();
 void lock();
 void unlock();
 bool checkUID(const uint8_t *uid1, size_t length1, const uint8_t *uid2, size_t length2);
+
+/**
+ * Check permission for the specified user-room combination using the web backend
+ * @param user_key The unique key of the users's NFC card
+ * @param room_id The id pf the room that should be accessed
+ * @param client The HttpClient for the connection to the server
+ */
+int check_permission(char *user_key, int room_id, HttpClient *client);
+
+/**
+ * Notify backend that access was granted
+ * @param user_key The unique key of the users's NFC card
+ * @param room_id The id pf the room that should be accessed
+ * @param client The HttpClient for the connection to the server
+ */
+int notify_access(char *user_key, int room_id, HttpClient *client);
 
 void setup()
 {
@@ -123,4 +140,40 @@ bool checkUID(const uint8_t *uid1, size_t length1, const uint8_t *uid2, size_t l
   }
 
   return true;
+}
+
+int check_permission(char *user_key, int room_id, HttpClient *client)
+{
+  char req[512];
+  sprintf(req, "https://cms.leon-barth.de/items/Users?fields=rooms.id&filter[key][_eq]=%s&filter[rooms][id][_eq]=%d", user_key, room_id);
+
+  client->get(req);
+  int res = client->responseStatusCode();
+
+  if (res >= 300)
+  {
+    return -1;
+  }
+
+  String payload = client->responseBody();
+
+  if (payload.equals("{\"data\":[]}"))
+    return -1;
+  else
+    return 0;
+}
+
+int notify_access(char *user_key, int room_id, HttpClient *client)
+{
+  char payload[512];
+  sprintf(payload, "{\"user\":\"%s\",\"room\":%d}", user_key, room_id);
+
+  client->post("https://cms.leon-barth.de/items/Accesses", "application/json", payload);
+
+  int res = client->responseStatusCode();
+
+  if (res >= 300)
+    return -1;
+  else
+    return 0;
 }
