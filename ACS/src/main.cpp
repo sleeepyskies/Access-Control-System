@@ -1,70 +1,44 @@
-#include <Arduino.h>
-#include <Wire.h>
-#include <SPI.h>
-#include <Adafruit_PN532.h>
-#include <Servo.h>
-#include <HttpClient.h>
-#include <ESP8266WiFi.h>
+#include "main.h"
 
+// NFC module definitions
 Adafruit_PN532 nfc(-1, -1);
 
-// pin configuration
-#define servo_pin D6
-#define green_pin D8
-#define red_pin D7
-#define buzzer_pin D5
+// Servo module definitions
 Servo s1;
 
-// servo motor
-const int unlocked = 0;
-const int locked = 180;
-
-// pre-defined UIDs with access
-byte skyUID[] = {0x04, 0x96, 0x40, 0x92, 0xAD, 0x6F, 0x80};
-const size_t skyUID_length = 7;
-
-// wifi information
-const char *ssid = "FRITZ!Box 7520 QC";
-const char *password = "hexenhaus666";
-
+// Clients for communication with the Internet
 WiFiClient client;
+WiFiClientSecure https_client;
+HTTPClient http_client;
 
-// function definitions
-void checkNFC();
-void lock();
-void unlock();
-bool checkUID(const uint8_t *uid1, size_t length1, const uint8_t *uid2, size_t length2);
-void connectWifi();
-
-/**
- * Check permission for the specified user-room combination using the web backend
- * @param user_key The unique key of the users's NFC card
- * @param room_id The id pf the room that should be accessed
- * @param client The HttpClient for the connection to the server
- */
-int check_permission(char *user_key, int room_id, HttpClient *client);
-
-/**
- * Notify backend that access was granted
- * @param user_key The unique key of the users's NFC card
- * @param room_id The id pf the room that should be accessed
- * @param client The HttpClient for the connection to the server
- */
-int notify_access(char *user_key, int room_id, HttpClient *client);
+// Buffer for UID conversion
+char uid_buffer[32];
 
 void setup()
 {
+    // Initialize serial port
+    Serial.print("Initializing Serial Port with rate 115200");
     Serial.begin(115200);
 
-    connectWifi();
+    // Initialize Servo
+    Serial.print("Initializing Servo and close door");
+    s1.attach(SERVO);
+    s1.write(DOOR_LOCKED); // initialize servo to DOOR_LOCKED state
 
-    s1.attach(servo_pin);
-    pinMode(red_pin, OUTPUT);
-    pinMode(green_pin, OUTPUT);
-    s1.write(locked); // initialize servo to locked state
-    digitalWrite(red_pin, LOW);
-    digitalWrite(green_pin, LOW);
-    noTone(buzzer_pin);
+    // Initialize LEDs
+    Serial.print("Initializing LEDs and turn off");
+    pinMode(LED_RED, OUTPUT);
+    pinMode(LED_GREEN, OUTPUT);
+    digitalWrite(LED_RED, LOW);
+    digitalWrite(LED_GREEN, LOW);
+
+    // Initialize buzzer
+    Serial.print("Initializing Buzzer and turn off");
+    noTone(BUZZER);
+
+    // Initialize Wifi connection and SHA1 key of the backend TLS
+    connectWifi();
+    https_client.setFingerprint("AE:DA:97:4E:F3:02:20:1F:0F:99:8C:12:26:E9:69:F4:7C:F5:60:88");
 
     // nfc reader setup
     nfc.begin();
@@ -74,144 +48,184 @@ void setup()
 
         delay(1000);
     }
+    delay(1000);
 }
 
 void loop()
 {
+    // Poll the NFC reader every second
     checkNFC();
     delay(1000);
 }
 
-// functions
+char *convertBytesToChar(uint8_t *bytes, int length)
+{
+    // Convert every byte to a string of its 2 digit hex representation
+    for (int i = 0; i < length; i++)
+        sprintf(uid_buffer + 2 * i, "%02X", bytes[i]);
+
+    // Add string termination symbol
+    uid_buffer[2 * length] = '\0';
+
+    return uid_buffer;
+}
+
 void checkNFC()
 {
-    uint8_t success;
     uint8_t uid[] = {0, 0, 0, 0, 0, 0, 0}; // Buffer to store the returned UID
     uint8_t uidLength;                     // Length of the UID (4 or 7 bytes depending on ISO14443A card type)
 
-    success = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength);
-
-    if (success)
+    // Read the NFC UID from the card
+    if (nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength))
     {
-        /* Serial.println("Found an ISO14443A card");
-        Serial.print("  UID Length: ");
-        Serial.print(uidLength, DEC);
-        Serial.println(" bytes");
-        Serial.print("  UID Value: ");
-        nfc.PrintHex(uid, uidLength);
-        Serial.println(""); */
-
-        if (checkUID(skyUID, skyUID_length, uid, uidLength))
+        // Check if the user is allowed to access  and notify the backend on succes
+        char *user_key = convertBytesToChar(uid, uidLength);
+        if (checkPermissionAndNotify(user_key, 1))
         {
-            unlock();
+            // Open door
+            unlockDoor();
             delay(5000);
         }
-        lock();
+        // Close door after 5secs
+        lockDoor();
     }
 }
 
-// unlocks door
-void unlock()
+void unlockDoor()
 {
-    s1.write(unlocked);
-    digitalWrite(red_pin, LOW);
-    digitalWrite(green_pin, HIGH);
-    tone(buzzer_pin, 500);
+    // Open the door
+    s1.write(DOOR_UNLOCKED);
+
+    // Turn off the RED LED
+    digitalWrite(LED_RED, LOW);
+
+    // Turn on the GREEN LED
+    digitalWrite(LED_GREEN, HIGH);
+
+    // Turn buzzer on for acoustic feedback
+    tone(BUZZER, 500);
 }
 
-// Locks door
-void lock()
+void lockDoor()
 {
-    s1.write(locked);
-    noTone(buzzer_pin);
-    digitalWrite(red_pin, HIGH);
-    digitalWrite(green_pin, LOW);
+    // Close the door
+    s1.write(DOOR_LOCKED);
+
+    // Turn off the buzzer
+    noTone(BUZZER);
+
+    // Turn off the GREEN LED
+    digitalWrite(LED_GREEN, LOW);
+
+    // Blink the RED LED 2 times
+    digitalWrite(LED_RED, HIGH);
     delay(200);
-    digitalWrite(red_pin, LOW);
+    digitalWrite(LED_RED, LOW);
     delay(200);
-    digitalWrite(red_pin, HIGH);
+    digitalWrite(LED_RED, HIGH);
     delay(200);
-    digitalWrite(red_pin, LOW);
+    digitalWrite(LED_RED, LOW);
     delay(200);
 }
 
-// Function to compare two NFC UIDs
-bool checkUID(const uint8_t *uid1, size_t length1, const uint8_t *uid2, size_t length2)
+int checkPermissionAndNotify(char *user_key, int room_id)
 {
-    if (length1 != length2)
-        return false;
-
-    for (size_t i = 0; i < length1; i++)
-    {
-        if (uid1[i] != uid2[i])
-        {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-int check_permission(char *user_key, int room_id, HttpClient *client)
-{
+    // Create GET request to check permissions
     char req[512];
-    sprintf(req, "https://cms.leon-barth.de/items/Users?fields=rooms.id&filter[key][_eq]=%s&filter[rooms][id][_eq]=%d", user_key, room_id);
+    sprintf(req, "https://cms.leon-barth.de/items/Users?fields=id,rooms.Rooms_id&filter[key][_eq]=%s&filter[rooms][Rooms_id][_eq]=%d", user_key, room_id);
 
-    client->get(req);
-    int res = client->responseStatusCode();
+    Serial.println("Try to check permission: " + String(req));
 
+    // Send GET request to the backend
+    http_client.begin(https_client, req);
+    int res = http_client.GET();
+    String payload = http_client.getString();
+    Serial.println("-> Got answer: " + String(res));
+    Serial.println("-> Got answer: " + payload);
+
+    // Handle failure
     if (res >= 300)
     {
         return -1;
     }
 
-    String payload = client->responseBody();
+    // Deserialize JSON response to extract user_id
+    DynamicJsonDocument json(1024);
+    deserializeJson(json, payload);
 
+    // Interpretation of the answer
     if (payload.equals("{\"data\":[]}"))
-        return -1;
-    else
+    {
+        Serial.println("-> Permission denied");
         return 0;
+    }
+    else
+    {
+        int user_id = json["data"][0]["id"];
+        notifyAccess(user_id, room_id);
+        Serial.println("-> Permission granted");
+        return 1;
+    }
 }
 
-int notify_access(char *user_key, int room_id, HttpClient *client)
+int notifyAccess(int user_id, int room_id)
 {
+    // Create POST request to notify the backend that acces was granted
     char payload[512];
-    sprintf(payload, "{\"user\":\"%s\",\"room\":%d}", user_key, room_id);
+    sprintf(payload, "{\"user\":%d,\"room\":%d}", user_id, room_id);
 
-    client->post("https://cms.leon-barth.de/items/Accesses", "application/json", payload);
+    Serial.println("Try to notify about access with payload: " + String(payload));
 
-    int res = client->responseStatusCode();
+    // Send POST request to the backend
+    http_client.begin(https_client, "https://cms.leon-barth.de/items/Accesses");
+    http_client.addHeader("Content-Type", "application/json");
+    int res = http_client.POST(String(payload));
 
+    Serial.println("-> Got answer: " + String(res));
+
+    // Interpret the result
     if (res >= 300)
-        return -1;
-    else
+    {
+        Serial.println("-> Failure");
         return 0;
+    }
+    else
+    {
+        Serial.println("-> Success");
+        return 1;
+    }
 }
 
 void connectWifi()
 {
-    // Connect to WiFi Network
-    Serial.println();
-    Serial.println();
-    Serial.print("Connecting to WiFi");
-    Serial.println("...");
-    WiFi.begin(ssid, password);
+    // Start trying to connect to the WiFi
+    Serial.println("Try connecting to WiFi: " + String(WIFI_SSID));
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+    // Limit retries
     int retries = 0;
-    while ((WiFi.status() != WL_CONNECTED) && (retries < 15))
+    while ((WiFi.status() != WL_CONNECTED) && (retries < WIFI_RETRIES))
     {
         retries++;
         delay(500);
         Serial.print(".");
     }
-    if (retries > 14)
+
+    // Handle failure
+    if (retries >= WIFI_RETRIES)
     {
-        Serial.println(F("WiFi connection FAILED"));
+        Serial.println(F(" FAILED"));
     }
+
+    // Handle success
     if (WiFi.status() == WL_CONNECTED)
     {
-        Serial.println(F("WiFi connected!"));
-        Serial.println("IP address: ");
+        Serial.println(F(" SUCCESS"));
+        Serial.print("IP address: ");
         Serial.println(WiFi.localIP());
     }
-    Serial.println(F("Setup ready"));
+}
+
+void initializeServo()
+{
 }
