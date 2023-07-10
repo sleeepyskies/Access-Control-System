@@ -128,11 +128,11 @@ void lockDoor()
     delay(200);
 }
 
-int checkPermissionAndNotify(char *user_key, int room_id)
+bool checkPermissionAndNotify(char *user_key, int room_id)
 {
     // Create GET request to check permissions
     char req[512];
-    sprintf(req, "https://cms.leon-barth.de/items/Users?fields=id,rooms.Rooms_id&filter[key][_eq]=%s&filter[rooms][Rooms_id][_eq]=%d", user_key, room_id);
+    sprintf(req, "%s/items/Users?fields=id,rooms.Rooms_id&filter[key][_eq]=%s&filter[rooms][Rooms_id][_eq]=%d", HOST, user_key, room_id);
 
     Serial.println("Try to check permission: " + String(req));
 
@@ -144,9 +144,11 @@ int checkPermissionAndNotify(char *user_key, int room_id)
     Serial.println("-> Got answer: " + payload);
 
     // Handle failure
-    if (res >= 300)
+    if ((res < 200) || (res >= 300))
     {
-        return -1;
+        Serial.println("-> Failure");
+
+        return false;
     }
 
     // Deserialize JSON response to extract user_id
@@ -157,18 +159,26 @@ int checkPermissionAndNotify(char *user_key, int room_id)
     if (payload.equals("{\"data\":[]}"))
     {
         Serial.println("-> Permission denied");
-        return 0;
+        return false;
+    }
+
+    // Extract user_id for access notification
+    int user_id = json["data"][0]["id"];
+
+    // Send access notification
+    if (notifyAccess(user_id, room_id))
+    {
+        Serial.println("-> Permission granted");
+        return true;
     }
     else
     {
-        int user_id = json["data"][0]["id"];
-        notifyAccess(user_id, room_id);
-        Serial.println("-> Permission granted");
-        return 1;
+        Serial.println("-> Permission denied");
+        return false;
     }
 }
 
-int notifyAccess(int user_id, int room_id)
+bool notifyAccess(int user_id, int room_id)
 {
     // Create POST request to notify the backend that acces was granted
     char payload[512];
@@ -177,9 +187,9 @@ int notifyAccess(int user_id, int room_id)
     Serial.println("Try to notify about access with payload: " + String(payload));
 
     // Send POST request to the backend
-    http_client.begin(https_client, "https://cms.leon-barth.de/items/Accesses");
+    http_client.begin(https_client, String(HOST) + "/items/Accesses");
     http_client.addHeader("Content-Type", "application/json");
-    int res = http_client.POST(String(payload));
+    int res = http_client.POST(payload);
 
     Serial.println("-> Got answer: " + String(res));
 

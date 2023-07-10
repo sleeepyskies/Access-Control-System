@@ -13,6 +13,9 @@ const char *WIFI_SSID = "SuperTollerHotspot";
 const char *WIFI_PASSWORD = "mrjh2041";
 #define WIFI_RETRIES 20
 
+// Backend host address
+const char *HOST = "https://cms.leon-barth.de";
+
 // Pin layout definitions
 #define LED_GREEN D8
 #define LED_RED D7
@@ -32,7 +35,7 @@ void checkNFC();
 
 /**
  * Establishes a WiFi connection with the credentials above
-*/
+ */
 void connectWifi();
 
 /**
@@ -40,23 +43,27 @@ void connectWifi();
  * notifies the backend if access was granted
  * @param user_key The unique key of the users's NFC card
  * @param room_id The id of the room that should be accessed
+ *
+ * @return true if access was granted
  */
-int checkPermissionAndNotify(char *user_key, int room_id);
+bool checkPermissionAndNotify(char *user_key, int room_id);
 
 /**
  * Notify backend that access was granted. Used by the "checkPermissionAndNotify"
  * method
  * @param user_id The id of the user in the database
  * @param room_id The id pf the room that should be accessed
+ *
+ * @return true if operation was successful
  */
-int notifyAccess(int user_id, int room_id);
+bool notifyAccess(int user_id, int room_id);
 
 /**
  * Controls the servo for locking the door
-*/
+ */
 void lockDoor();
 
 /**
  * Controls the servo for unlocking the door
-*/
+ */
 void unlockDoor();
