@@ -38,7 +38,6 @@ void setup()
 
     // Initialize Wifi connection and SHA1 key of the backend TLS
     connectWifi();
-    https_client.setFingerprint("AE:DA:97:4E:F3:02:20:1F:0F:99:8C:12:26:E9:69:F4:7C:F5:60:88");
 
     // nfc reader setup
     nfc.begin();
@@ -233,9 +232,7 @@ void connectWifi()
         Serial.println(F(" SUCCESS"));
         Serial.print("IP address: ");
         Serial.println(WiFi.localIP());
-    }
-}
 
-void initializeServo()
-{
+        https_client.setFingerprint("AE:DA:97:4E:F3:02:20:1F:0F:99:8C:12:26:E9:69:F4:7C:F5:60:88");
+    }
 }
